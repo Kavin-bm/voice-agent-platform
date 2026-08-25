@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Dograh is a git submodule (see runtime/README.md) — not vendored here.
+/runtime/dograh/
