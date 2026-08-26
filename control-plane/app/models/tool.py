@@ -31,6 +31,12 @@ class Tool(Base, UUIDPk, Timestamped):
     name: Mapped[str] = mapped_column(String(100))
     config: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # Set once dograh_client.py syncs this row to a Dograh Tool (its own
+    # CRUD + MCP test endpoint) — see the architecture-pivot note in the
+    # plan. Null until synced; built-in tools resolve to Dograh's native
+    # workflow nodes instead and may never get one.
+    dograh_tool_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
 
 class AgentVersionTool(Base, UUIDPk):
     __tablename__ = "agent_version_tools"

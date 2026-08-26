@@ -18,6 +18,12 @@ class CampaignStatus(str, enum.Enum):
 
 
 class Campaign(Base, UUIDPk, Timestamped, TenantScoped):
+    """Tenant-facing record (ours); actual dialing/retry/concurrency is
+    delegated to Dograh's own campaign engine (create/start/pause/resume/
+    redial) via dograh_client.py once dograh_campaign_id is set — see the
+    architecture-pivot note in the plan. max_retries/scheduled_at are the
+    inputs we hand to Dograh's campaign config, not a parallel mechanism."""
+
     __tablename__ = "campaigns"
 
     agent_version_id: Mapped[uuid.UUID] = mapped_column(
@@ -29,6 +35,7 @@ class Campaign(Base, UUIDPk, Timestamped, TenantScoped):
     )
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dograh_campaign_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class CampaignLeadStatus(str, enum.Enum):
