@@ -11,8 +11,11 @@ class Tenant(Base, UUIDPk, Timestamped):
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(200), unique=True, index=True)
 
-    # This tenant's Dograh organization, provisioned via /auth/signup + a
-    # service API key (see dograh_client.py). The one Dograh-shaped field on
-    # a core model: it's the tenant<->runtime mapping itself, not business
-    # data, and every other Dograh integration detail stays out of app/models.
-    dograh_org_encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # This tenant's Dograh organization. Provisioned via Dograh's local
+    # /auth/signup (auto-bootstraps an org), not their service-key endpoint —
+    # that's backed by Dograh's hosted MPS, not self-hosted (see the plan's
+    # architecture-pivot note). dograh_client.py logs in on demand with these
+    # and caches the short-lived JWT in-process; nothing else in the
+    # codebase should read these fields directly.
+    dograh_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    dograh_encrypted_password: Mapped[str | None] = mapped_column(Text, nullable=True)

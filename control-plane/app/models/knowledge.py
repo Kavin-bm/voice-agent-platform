@@ -1,12 +1,21 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 from app.models.base import TenantScoped, Timestamped, UUIDPk
+
+# Dograh's own knowledge-base pipeline routes document parsing through their
+# hosted Managed Platform Service (services.dograh.com) even in "OSS" mode —
+# not actually self-hostable, and a data-privacy non-starter for client
+# documents. So this stays our own pipeline: parse/chunk ourselves, embed via
+# litellm (BYOK), store here. Retrieval is exposed as a plain webhook Tool
+# Dograh calls mid-call — see Tools & integrations in the plan.
+EMBEDDING_DIM = 1536
 
 
 class DocumentStatus(str, enum.Enum):
@@ -28,14 +37,6 @@ class KnowledgeSource(Base, UUIDPk, Timestamped, TenantScoped):
 
 
 class Document(Base, UUIDPk, Timestamped, TenantScoped):
-    """We're the system of record (ownership, our own MinIO copy for
-    portability across a future runtime swap); the actual parse/chunk/embed/
-    search is proxied to Dograh's knowledge-base (see the architecture-pivot
-    note in the plan) — dograh_document_uuid is that mapping, and status
-    mirrors Dograh's own processing_status. No local Chunk/embedding table:
-    reimplementing that pipeline would just duplicate what Dograh already
-    does, at the cost of an extra retrieval hop during a live call."""
-
     __tablename__ = "documents"
 
     knowledge_source_id: Mapped[uuid.UUID] = mapped_column(
@@ -43,8 +44,21 @@ class Document(Base, UUIDPk, Timestamped, TenantScoped):
     )
     source_type: Mapped[str] = mapped_column(String(20))  # pdf | docx | xlsx | txt | url
     source_uri: Mapped[str] = mapped_column(String)  # our MinIO object key or source URL
-    dograh_document_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status"), default=DocumentStatus.pending
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Chunk(Base, UUIDPk, Timestamped, TenantScoped):
+    """Retrieved dynamically via the search_knowledge tool during a call —
+    never inserted directly into the prompt (PRD section 4)."""
+
+    __tablename__ = "chunks"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
