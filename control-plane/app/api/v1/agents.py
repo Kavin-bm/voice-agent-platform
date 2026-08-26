@@ -11,6 +11,7 @@ from app.models.agent import Agent, AgentVersion
 from app.models.business import Business
 from app.models.template import AgentTemplate, VerticalPack
 from app.schemas.agent import AgentCreate, AgentRead, AgentVersionRead
+from app.services.agent_compiler import compile_agent_version
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -112,3 +113,29 @@ async def list_agent_versions(
         .order_by(AgentVersion.version_number)
     )
     return list(result.scalars().all())
+
+
+async def _get_owned_version(
+    agent_id: uuid.UUID, version_id: uuid.UUID, tenant_id: uuid.UUID, db: AsyncSession
+) -> AgentVersion:
+    version = await db.get(AgentVersion, version_id)
+    if version is None or version.tenant_id != tenant_id or version.agent_id != agent_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent version not found")
+    return version
+
+
+@router.post("/{agent_id}/versions/{version_id}/compile", response_model=AgentVersionRead)
+async def compile_version(
+    agent_id: uuid.UUID,
+    version_id: uuid.UUID,
+    tenant_id: Annotated[uuid.UUID, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentVersionRead:
+    """Assembles template+vertical pack+business+knowledge+policies+tools+
+    voice into AgentVersion.compiled_spec — the neutral spec adapters/
+    dograh.py later translates into a runtime workflow. Re-running this
+    after editing policies/business config refreshes the draft; it never
+    touches a published version's live binding."""
+    version = await _get_owned_version(agent_id, version_id, tenant_id, db)
+    await compile_agent_version(db, version)
+    return version
