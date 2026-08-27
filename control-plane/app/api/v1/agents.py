@@ -7,11 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import get_current_tenant_id
-from app.models.agent import Agent, AgentVersion
+from app.models.agent import Agent, AgentVersion, AgentVersionStatus
 from app.models.business import Business
+from app.models.tenant import Tenant
 from app.models.template import AgentTemplate, VerticalPack
 from app.schemas.agent import AgentCreate, AgentRead, AgentVersionRead
 from app.services.agent_compiler import compile_agent_version
+from app.services.dograh_client import publish_compiled_spec
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -138,4 +140,29 @@ async def compile_version(
     touches a published version's live binding."""
     version = await _get_owned_version(agent_id, version_id, tenant_id, db)
     await compile_agent_version(db, version)
+    return version
+
+
+@router.post("/{agent_id}/versions/{version_id}/publish", response_model=AgentVersionRead)
+async def publish_version(
+    agent_id: uuid.UUID,
+    version_id: uuid.UUID,
+    tenant_id: Annotated[uuid.UUID, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentVersionRead:
+    """Pushes compiled_spec to Dograh as a workflow and publishes it there.
+    Does not yet bind a phone number to it (Phase 8) — this only makes the
+    version runnable, e.g. via a future test-call."""
+    version = await _get_owned_version(agent_id, version_id, tenant_id, db)
+    if not version.compiled_spec:
+        await compile_agent_version(db, version)
+
+    agent = await db.get(Agent, agent_id)
+    tenant = await db.get(Tenant, tenant_id)
+    workflow_id = await publish_compiled_spec(db, tenant, agent.name, version.compiled_spec)
+
+    version.dograh_workflow_id = workflow_id
+    version.status = AgentVersionStatus.published
+    await db.commit()
+    await db.refresh(version)
     return version
