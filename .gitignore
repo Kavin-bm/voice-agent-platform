@@ -7,3 +7,8 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+
+# dashboard/ has its own .gitignore (create-next-app default) covering
+# node_modules/.next/.env*/.DS_Store within it — this catches stray
+# .DS_Store elsewhere in the repo.
+.DS_Store

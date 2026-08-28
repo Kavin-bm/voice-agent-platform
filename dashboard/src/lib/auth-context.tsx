@@ -19,6 +19,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
+    // Reads localStorage, which isn't available during server render — this
+    // is the documented case for syncing React state from an external
+    // source on mount, not state derived from props/state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAuthenticated(Boolean(getToken()));
     setIsLoading(false);
   }, []);

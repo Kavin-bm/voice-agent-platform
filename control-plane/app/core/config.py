@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     minio_documents_bucket: str = "documents"
     minio_recordings_bucket: str = "recordings"
 
+    # The dashboard runs on a different origin (localhost:3000) in dev and
+    # its own domain in prod — CORS has to allow it explicitly.
+    dashboard_origins: str = "http://localhost:3000,http://localhost:3001"
+
+    @property
+    def dashboard_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.dashboard_origins.split(",") if origin.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:

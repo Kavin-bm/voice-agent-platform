@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAsync } from "@/lib/useAsync";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/Button";
-import { Field, inputClass } from "@/components/Field";
+import { Field, baseInputClass, inputClass } from "@/components/Field";
 import { WizardSteps } from "@/components/WizardSteps";
 import { BusinessForm } from "@/components/BusinessForm";
 import { IconCheck, IconPlus } from "@/components/icons";
@@ -39,8 +39,14 @@ export default function NewAgentWizard() {
   const selectedBusiness = businesses.data?.find((b) => b.id === businessId);
   const selectedTemplate = templates.data?.find((t) => t.id === templateId);
   const selectedPack = verticalPacks.data?.find((v) => v.id === verticalPackId);
+  const defaultAgentName = selectedBusiness ? `${selectedTemplate?.name ?? "Agent"} — ${selectedBusiness.name}` : "";
 
-  const canAdvance = [Boolean(businessId), Boolean(templateId), agentName.trim().length > 0, true][step];
+  const canAdvance = [
+    Boolean(businessId),
+    Boolean(templateId),
+    (agentName || defaultAgentName).trim().length > 0,
+    true,
+  ][step];
 
   return (
     <div className="max-w-3xl">
@@ -49,7 +55,8 @@ export default function NewAgentWizard() {
       <WizardSteps steps={STEPS} current={step} />
 
       <div className="rounded-lg border border-rule bg-surface p-7">
-        {step === 0 && (
+        {step === 0 && businesses.isLoading && <p className="text-sm text-ink-soft">Loading businesses…</p>}
+        {step === 0 && !businesses.isLoading && (
           <StepBusiness
             businesses={businesses.data ?? []}
             selectedId={businessId}
@@ -79,7 +86,7 @@ export default function NewAgentWizard() {
           <StepDetails
             agentName={agentName}
             onNameChange={setAgentName}
-            defaultName={selectedBusiness ? `${selectedTemplate?.name ?? "Agent"} — ${selectedBusiness.name}` : ""}
+            defaultName={defaultAgentName}
             policies={policies}
             onPoliciesChange={setPolicies}
           />
@@ -305,8 +312,13 @@ function PolicyAdder({ onAdd }: { onAdd: (p: DraftPolicy) => void }) {
 
   return (
     <div className="flex items-start gap-2">
-      <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="category" className={`${inputClass} w-32 flex-none`} />
-      <input value={ruleText} onChange={(e) => setRuleText(e.target.value)} placeholder="e.g. We do not accept international cards." className={inputClass} />
+      <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="category" className={`${baseInputClass} w-32 flex-none`} />
+      <input
+        value={ruleText}
+        onChange={(e) => setRuleText(e.target.value)}
+        placeholder="e.g. We do not accept international cards."
+        className={`${baseInputClass} flex-1 min-w-0`}
+      />
       <Button type="button" variant="secondary" onClick={handleAdd} className="flex-none">
         <IconPlus className="h-4 w-4" />
       </Button>
