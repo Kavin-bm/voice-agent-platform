@@ -142,6 +142,19 @@ async def add_document_from_url(
     return document
 
 
+@router.get("/knowledge-sources/{knowledge_source_id}/documents", response_model=list[DocumentRead])
+async def list_documents(
+    knowledge_source_id: uuid.UUID,
+    tenant_id: Annotated[uuid.UUID, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[DocumentRead]:
+    await _get_owned_knowledge_source(knowledge_source_id, tenant_id, db)
+    result = await db.execute(
+        select(Document).where(Document.knowledge_source_id == knowledge_source_id)
+    )
+    return list(result.scalars().all())
+
+
 @router.get("/documents/{document_id}", response_model=DocumentRead)
 async def get_document(
     document_id: uuid.UUID,

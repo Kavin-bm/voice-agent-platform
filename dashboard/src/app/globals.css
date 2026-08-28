@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/* Same blueprint/telecom-schematic identity as the implementation manual —
+   this dashboard and that document are the same internal tool suite, so
+   they're deliberately one visual system, not two. */
+
+:root {
+  --ground: #eef2f4;
+  --surface: #ffffff;
+  --surface-raised: #e2e9ec;
+  --ink: #101826;
+  --ink-soft: #5b6b78;
+  --copper: #a85c32;
+  --copper-soft: #c98a5e;
+  --wire: #0e7f82;
+  --wire-soft: #2fa5a9;
+  --rule: #d7dee1;
+  --rule-strong: #b7c2c8;
+  --good: #2f7d4f;
+  --warn: #b4790c;
+  --bad: #b3432f;
+  --pending: #7a7568;
+  --code-bg: #16202c;
+  --code-fg: #dce6ea;
+}
+
+/* --font-display / --font-body / --font-mono come from next/font, applied
+   as a className on <html> in layout.tsx — not redeclared here to avoid two
+   sources of truth for the same variable. */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0d1420;
+    --surface: #131c2a;
+    --surface-raised: #182333;
+    --ink: #dce6ea;
+    --ink-soft: #93a5af;
+    --copper: #c98a5e;
+    --copper-soft: #a85c32;
+    --wire: #4fc3c7;
+    --wire-soft: #2fa5a9;
+    --rule: #2a3648;
+    --rule-strong: #3d4e63;
+    --good: #5fbd84;
+    --warn: #e0a63a;
+    --bad: #e2685a;
+    --pending: #8b8779;
+    --code-bg: #060a10;
+    --code-fg: #dce6ea;
+  }
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-copper: var(--copper);
+  --color-copper-soft: var(--copper-soft);
+  --color-wire: var(--wire);
+  --color-wire-soft: var(--wire-soft);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-pending: var(--pending);
+  --color-code-bg: var(--code-bg);
+  --color-code-fg: var(--code-fg);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+::selection {
+  background: var(--copper-soft);
+  color: #0d1420;
+}
+
+* {
+  scrollbar-color: var(--rule-strong) transparent;
+}
