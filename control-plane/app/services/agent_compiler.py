@@ -54,6 +54,7 @@ def build_compiled_spec(
     return {
         "prompt": prompt,
         "business": {
+            "id": str(business.id),
             "name": business.name,
             "structured_config": business.structured_config,
             "default_transfer_number": business.default_transfer_number,

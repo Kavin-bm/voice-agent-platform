@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.internal import router as internal_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.services.dograh_client import DograhClientError
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router)
+app.include_router(internal_router)
 
 
 @app.exception_handler(DograhClientError)

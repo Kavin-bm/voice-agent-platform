@@ -25,8 +25,22 @@ class Settings(BaseSettings):
     credential_encryption_key: str = "change-me-in-.env"
 
     dograh_base_url: str = "http://localhost:8080"
-    dograh_api_key: str = ""
     dograh_webhook_secret: str = "change-me-in-.env"
+
+    # URL Dograh's own containers use to call back into us (tool webhooks,
+    # inbound-call webhook). Distinct from dograh_base_url (which is how WE
+    # reach Dograh) because the two sides usually can't use "localhost" for
+    # each other — e.g. on Docker Desktop, Dograh's container reaches a
+    # control-plane running directly on the host via host.docker.internal,
+    # not localhost, even though our own browser/dashboard uses localhost.
+    dograh_callback_base_url: str = "http://host.docker.internal:8000"
+
+    # Shared secret Dograh sends back on every tool webhook call (transfer_call/
+    # end_call ride Dograh's native nodes, so only book_appointment/
+    # search_knowledge-style webhook tools use this) — checked in
+    # api/v1/internal_tools.py. Not a full auth system: these endpoints only
+    # ever get called by Dograh, never a browser.
+    internal_tool_secret: str = "change-me-in-.env"
 
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "voiceagent"

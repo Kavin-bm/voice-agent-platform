@@ -16,6 +16,51 @@ NOTE — verified vs. unverified:
   a live Dograh instance before the first real client deployment.
 """
 
+from app.core.config import get_settings
+
+settings = get_settings()
+
+
+def _search_knowledge_tool_definition(business_id: str) -> dict:
+    """search_knowledge is a webhook tool like any other, pointed at our own
+    retrieval endpoint (services/search.py) rather than a tenant's URL.
+    business_id is baked in as a preset_parameter — fixed at compile time,
+    never something the LLM has to know or could get wrong — so retrieval
+    can never leak across businesses/tenants."""
+
+    return {
+        "name": "search_knowledge",
+        "description": (
+            "Search this business's knowledge base for facts the caller is asking "
+            "about (pricing, hours, services, policies). Always use this instead of "
+            "guessing when the answer isn't already in your instructions."
+        ),
+        "definition": {
+            "type": "http_api",
+            "config": {
+                "method": "POST",
+                "url": f"{settings.dograh_callback_base_url}/internal/tools/search-knowledge",
+                "headers": {"X-Tool-Secret": settings.internal_tool_secret},
+                "parameters": [
+                    {
+                        "name": "query",
+                        "type": "string",
+                        "description": "The caller's question, as a short search query.",
+                        "required": True,
+                    }
+                ],
+                "preset_parameters": [
+                    {
+                        "name": "business_id",
+                        "type": "string",
+                        "value_template": business_id,
+                        "required": True,
+                    }
+                ],
+            },
+        },
+    }
+
 
 def build_workflow_definition(compiled_spec: dict, tool_uuids: list[str]) -> dict:
     policies_text = "\n".join(
@@ -126,6 +171,8 @@ def build_tool_definitions(compiled_spec: dict) -> list[dict]:
                     "definition": {"type": "end_call", "config": {"messageType": "none"}},
                 }
             )
+        elif name == "search_knowledge":
+            definitions.append(_search_knowledge_tool_definition(compiled_spec["business"]["id"]))
         elif tool["config"].get("url"):
             config = tool["config"]
             definitions.append(
