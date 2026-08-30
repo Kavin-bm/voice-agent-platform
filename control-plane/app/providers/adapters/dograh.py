@@ -62,7 +62,7 @@ def _search_knowledge_tool_definition(business_id: str) -> dict:
     }
 
 
-def build_workflow_definition(compiled_spec: dict, tool_uuids: list[str]) -> dict:
+def build_workflow_definition(compiled_spec: dict, tool_uuids: list[str], agent_version_id: str) -> dict:
     policies_text = "\n".join(
         f"- {p['rule_text'].strip()}" for p in compiled_spec["policies"] if p.get("rule_text")
     )
@@ -114,6 +114,36 @@ def build_workflow_definition(compiled_spec: dict, tool_uuids: list[str]) -> dic
                 "name": "End Call",
                 "prompt": "Thank the caller warmly and end the call.",
                 "add_global_prompt": True,
+            },
+        },
+        # Standalone integration node — graph_constraints require zero
+        # incoming/outgoing edges, it just fires once the run completes.
+        # agent_version_id is a literal (not a {{...}} template) since we
+        # already know it at publish time; everything else is Dograh's own
+        # Jinja context, read from services/workflow/dto.py's WebhookNodeData
+        # spec_default (payload_template shape confirmed there, not from a
+        # live call — no real telephony credential to trigger one in this
+        # environment).
+        {
+            "id": "call-complete-webhook",
+            "type": "webhook",
+            "position": {"x": 900, "y": 300},
+            "data": {
+                "name": "Notify Control Plane",
+                "enabled": True,
+                "http_method": "POST",
+                "endpoint_url": f"{settings.dograh_callback_base_url}/internal/webhooks/dograh-call-complete",
+                "custom_headers": [
+                    {"key": "X-Webhook-Secret", "value": settings.dograh_webhook_secret}
+                ],
+                "payload_template": {
+                    "agent_version_id": agent_version_id,
+                    "workflow_run_id": "{{workflow_run_id}}",
+                    "call_duration_seconds": "{{cost_info.call_duration_seconds}}",
+                    "call_disposition": "{{gathered_context.call_disposition}}",
+                    "recording_url": "{{recording_url}}",
+                    "transcript_url": "{{transcript_url}}",
+                },
             },
         },
     ]

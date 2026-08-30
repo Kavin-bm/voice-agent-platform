@@ -159,7 +159,9 @@ async def publish_version(
 
     agent = await db.get(Agent, agent_id)
     tenant = await db.get(Tenant, tenant_id)
-    workflow_id = await publish_compiled_spec(db, tenant, agent.name, version.compiled_spec)
+    workflow_id = await publish_compiled_spec(
+        db, tenant, agent.name, str(version.id), version.compiled_spec
+    )
 
     version.dograh_workflow_id = workflow_id
     version.status = AgentVersionStatus.published

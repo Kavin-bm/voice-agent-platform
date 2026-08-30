@@ -119,7 +119,7 @@ async def _create_workflow(client: "_RaisingClient", token: str, name: str, defi
 
 
 async def publish_compiled_spec(
-    db: AsyncSession, tenant: Tenant, agent_name: str, compiled_spec: dict
+    db: AsyncSession, tenant: Tenant, agent_name: str, agent_version_id: str, compiled_spec: dict
 ) -> str:
     """Pushes a compiled_spec to Dograh as a workflow. Returns the Dograh
     workflow id (stored as AgentVersion.dograh_workflow_id by the caller).
@@ -144,7 +144,25 @@ async def publish_compiled_spec(
             for tool_def in build_tool_definitions(compiled_spec)
         ]
 
-        definition = build_workflow_definition(compiled_spec, tool_uuids)
+        definition = build_workflow_definition(compiled_spec, tool_uuids, agent_version_id)
         workflow_id = await _create_workflow(client, token, agent_name, definition)
 
     return str(workflow_id)
+
+
+async def fetch_call_artifact(tenant: Tenant, url: str) -> str:
+    """Fetches a recording/transcript URL from the webhook payload. Tries
+    unauthenticated first (most likely a presigned MinIO URL, already
+    signed) and falls back to the tenant's Dograh bearer token — unverified
+    which of these Dograh actually uses, no real call has hit this yet."""
+
+    async with httpx.AsyncClient(timeout=30) as plain_client:
+        response = await plain_client.get(url)
+        if response.status_code == 200:
+            return response.text
+
+    token = await _login(tenant)
+    async with httpx.AsyncClient(timeout=30) as auth_client:
+        response = await auth_client.get(url, headers={"Authorization": f"Bearer {token}"})
+        response.raise_for_status()
+        return response.text
