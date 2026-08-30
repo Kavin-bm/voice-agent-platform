@@ -73,7 +73,10 @@ async def ensure_tenant_provisioned(db: AsyncSession, tenant: Tenant) -> None:
     if tenant.dograh_email:
         return
 
-    email = f"tenant-{tenant.slug}@voiceagentplatform.local"
+    # Dograh's signup validates email syntax including a reserved/special-use
+    # TLD check — .local, .test, .example, .invalid all get rejected even
+    # though nothing ever actually emails this address.
+    email = f"tenant-{tenant.slug}@tenants.voiceagentplatform.com"
     password = secrets.token_urlsafe(24)
 
     async with _client() as client:
@@ -103,7 +106,7 @@ async def _create_tool(client: "_RaisingClient", token: str, tool_def: dict) -> 
     response = await client.post(
         "/api/v1/tools/", json=tool_def, headers={"Authorization": f"Bearer {token}"}
     )
-    return response.json()["uuid"]
+    return response.json()["tool_uuid"]
 
 
 async def _create_workflow(client: "_RaisingClient", token: str, name: str, definition: dict) -> int:
@@ -115,17 +118,22 @@ async def _create_workflow(client: "_RaisingClient", token: str, name: str, defi
     return response.json()["id"]
 
 
-async def _publish_workflow(client: "_RaisingClient", token: str, workflow_id: int) -> None:
-    await client.post(f"/api/v1/workflow/{workflow_id}/publish", headers={"Authorization": f"Bearer {token}"})
-
-
 async def publish_compiled_spec(
     db: AsyncSession, tenant: Tenant, agent_name: str, compiled_spec: dict
 ) -> str:
-    """Pushes a compiled_spec to Dograh as a workflow and publishes it.
-    Returns the Dograh workflow id (stored as AgentVersion.dograh_workflow_id
-    by the caller). Tools referenced by the spec are (re)created fresh each
-    call — see build_tool_definitions for why."""
+    """Pushes a compiled_spec to Dograh as a workflow. Returns the Dograh
+    workflow id (stored as AgentVersion.dograh_workflow_id by the caller).
+
+    POST /workflow/create/definition publishes immediately — version 1 comes
+    back with status "published" already (confirmed against a live Dograh
+    instance: GET .../versions shows published_at set on creation) — so
+    there's no separate publish call to make; hitting /workflow/{id}/publish
+    afterward 400s with "No draft to publish" since nothing is pending.
+
+    Tools referenced by the spec are (re)created fresh each call — see
+    build_tool_definitions for why. Republishing likewise creates a new
+    Dograh workflow rather than updating the old one in place; acceptable
+    for MVP, revisit if orphaned workflows become a real cleanup problem."""
 
     await ensure_tenant_provisioned(db, tenant)
     token = await _login(tenant)
@@ -138,6 +146,5 @@ async def publish_compiled_spec(
 
         definition = build_workflow_definition(compiled_spec, tool_uuids)
         workflow_id = await _create_workflow(client, token, agent_name, definition)
-        await _publish_workflow(client, token, workflow_id)
 
     return str(workflow_id)
