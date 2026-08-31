@@ -5,6 +5,7 @@ from app.api.v1 import (
     auth,
     businesses,
     calls,
+    campaigns,
     credentials,
     knowledge,
     phone_numbers,
@@ -24,3 +25,4 @@ api_router.include_router(knowledge.router)
 api_router.include_router(policies.router)
 api_router.include_router(phone_numbers.router)
 api_router.include_router(calls.router)
+api_router.include_router(campaigns.router)

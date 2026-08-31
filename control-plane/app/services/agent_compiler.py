@@ -35,11 +35,22 @@ def build_compiled_spec(
     if vertical_pack and vertical_pack.prompt_additions:
         prompt = f"{prompt}\n\n{_fill(vertical_pack.prompt_additions, business)}"
 
-    policies = list(template.default_policies)
-    if vertical_pack:
-        policies += vertical_pack.extra_policies
+    # rule_text needs the same {{business_name}} fill as the prompt — Dograh
+    # renders every node's prompt (global instructions included) through its
+    # own Jinja engine, so a leftover literal "{{business_name}}" isn't just
+    # unfilled text, it's an undefined template variable that fails
+    # validation at campaign-creation time (found live: "Workflow uses
+    # template variables that are missing from the source data").
+    policies = [
+        {**p, "rule_text": _fill(p["rule_text"], business)}
+        for p in [*template.default_policies, *(vertical_pack.extra_policies if vertical_pack else [])]
+    ]
     policies += [
-        {"category": p.category, "rule_text": p.rule_text, "escalation_target": p.escalation_target}
+        {
+            "category": p.category,
+            "rule_text": _fill(p.rule_text, business),
+            "escalation_target": p.escalation_target,
+        }
         for p in explicit_policies
     ]
 

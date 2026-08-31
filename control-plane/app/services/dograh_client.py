@@ -61,6 +61,9 @@ class _RaisingClient:
     async def post(self, url: str, **kwargs) -> httpx.Response:
         return await self.request("POST", url, **kwargs)
 
+    async def get(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("GET", url, **kwargs)
+
 
 def _client() -> _RaisingClient:
     return _RaisingClient()
@@ -148,6 +151,82 @@ async def publish_compiled_spec(
         workflow_id = await _create_workflow(client, token, agent_name, definition)
 
     return str(workflow_id)
+
+
+async def create_dograh_campaign(
+    tenant: Tenant, name: str, dograh_workflow_id: str, csv_bytes: bytes
+) -> str:
+    """Uploads the lead CSV and creates the Dograh campaign in one call.
+    Confirmed against source (routes/campaign.py, routes/s3_signed_url.py):
+    campaigns take a CSV file reference (source_id = the presigned-upload
+    file_key), not an inline lead list — phone_number column required,
+    every other column becomes {{initial_context.*}} for the workflow.
+
+    Dograh resolves telephony_configuration_id itself when omitted, but
+    raises if the org has none configured at all — unverified past that
+    point in this environment, since no real Exotel/Plivo account exists
+    here to configure one (see the plan's telephony-binding gap)."""
+
+    token = await _login(tenant)
+
+    async with _client() as client:
+        presign = await client.post(
+            "/api/v1/s3/presigned-upload-url",
+            json={"file_name": "leads.csv", "file_size": len(csv_bytes), "content_type": "text/csv"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        upload_url = presign.json()["upload_url"]
+        file_key = presign.json()["file_key"]
+
+        async with httpx.AsyncClient(timeout=30) as plain_client:
+            put_response = await plain_client.put(
+                upload_url, content=csv_bytes, headers={"Content-Type": "text/csv"}
+            )
+            put_response.raise_for_status()
+
+        campaign = await client.post(
+            "/api/v1/campaign/create",
+            json={
+                "name": name,
+                "workflow_id": int(dograh_workflow_id),
+                "source_type": "csv",
+                "source_id": file_key,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        return str(campaign.json()["id"])
+
+
+async def _campaign_action(tenant: Tenant, dograh_campaign_id: str, action: str) -> dict:
+    token = await _login(tenant)
+    async with _client() as client:
+        response = await client.post(
+            f"/api/v1/campaign/{dograh_campaign_id}/{action}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        return response.json()
+
+
+async def start_dograh_campaign(tenant: Tenant, dograh_campaign_id: str) -> dict:
+    return await _campaign_action(tenant, dograh_campaign_id, "start")
+
+
+async def pause_dograh_campaign(tenant: Tenant, dograh_campaign_id: str) -> dict:
+    return await _campaign_action(tenant, dograh_campaign_id, "pause")
+
+
+async def resume_dograh_campaign(tenant: Tenant, dograh_campaign_id: str) -> dict:
+    return await _campaign_action(tenant, dograh_campaign_id, "resume")
+
+
+async def get_dograh_campaign_progress(tenant: Tenant, dograh_campaign_id: str) -> dict:
+    token = await _login(tenant)
+    async with _client() as client:
+        response = await client.get(
+            f"/api/v1/campaign/{dograh_campaign_id}/progress",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        return response.json()
 
 
 async def fetch_call_artifact(tenant: Tenant, url: str) -> str:
