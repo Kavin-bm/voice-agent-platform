@@ -143,6 +143,15 @@ def build_workflow_definition(compiled_spec: dict, tool_uuids: list[str], agent_
                     "call_disposition": "{{gathered_context.call_disposition}}",
                     "recording_url": "{{recording_url}}",
                     "transcript_url": "{{transcript_url}}",
+                    # Confirmed against source (services/campaign/campaign_call_
+                    # dispatcher.py): every campaign-dispatched run sets both the
+                    # top-level campaign_id and initial_context.direction=
+                    # "outbound" explicitly; neither exists on an inbound run's
+                    # context, so this is a real signal, not a guess — see
+                    # internal.py's dograh_call_complete for how it's used.
+                    "direction": "{{initial_context.direction}}",
+                    "dograh_campaign_id": "{{campaign_id}}",
+                    "called_number": "{{initial_context.called_number}}",
                 },
             },
         },

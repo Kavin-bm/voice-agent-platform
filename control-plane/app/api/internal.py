@@ -7,12 +7,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models.agent import AgentVersion
 from app.models.call import Call, CallDirection, CallStatus, Recording, Transcript
+from app.models.campaign import Campaign, CampaignLead
 from app.models.tenant import Tenant
 from app.services.dograh_client import fetch_call_artifact
 from app.services.search import search_knowledge
@@ -73,6 +75,9 @@ class CallCompleteWebhook(BaseModel):
     call_disposition: str | None = None
     recording_url: str | None = None
     transcript_url: str | None = None
+    direction: str | None = None
+    dograh_campaign_id: str | None = None
+    called_number: str | None = None
 
 
 @webhooks_router.post(
@@ -96,14 +101,40 @@ async def dograh_call_complete(
     except ValueError:
         duration = None
 
+    # Campaign-dispatched runs set initial_context.direction="outbound"
+    # explicitly (confirmed against Dograh's campaign dispatcher source);
+    # nothing sets it for an inbound run, so its absence is a real signal.
+    # dograh_campaign_id backs that up and lets us resolve the specific
+    # CampaignLead this call was for, by matching the dialed number.
+    is_outbound = body.direction == "outbound" or bool(
+        body.dograh_campaign_id and body.dograh_campaign_id not in ("None", "")
+    )
+
+    campaign_lead_id = None
+    if is_outbound and body.dograh_campaign_id and body.called_number:
+        campaign = (
+            await db.execute(
+                select(Campaign).where(
+                    Campaign.tenant_id == version.tenant_id,
+                    Campaign.dograh_campaign_id == body.dograh_campaign_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if campaign:
+            campaign_lead_id = (
+                await db.execute(
+                    select(CampaignLead.id).where(
+                        CampaignLead.campaign_id == campaign.id,
+                        CampaignLead.phone_number == body.called_number,
+                    )
+                )
+            ).scalar_one_or_none()
+
     call = Call(
         tenant_id=version.tenant_id,
         agent_version_id=version.id,
-        # Direction isn't in this payload and phone-number binding doesn't
-        # distinguish inbound triggers from campaign/test-call triggers yet
-        # — defaulting to inbound is a flagged simplification, not a
-        # considered answer; revisit once campaigns (Ch. 07) exist.
-        direction=CallDirection.inbound,
+        campaign_lead_id=campaign_lead_id,
+        direction=CallDirection.outbound if is_outbound else CallDirection.inbound,
         status=CallStatus.completed,
         dograh_call_id=body.workflow_run_id,
         duration_sec=duration,
