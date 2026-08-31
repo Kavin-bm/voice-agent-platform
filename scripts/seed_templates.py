@@ -22,9 +22,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = REPO_ROOT / "templates"
 
 # Global (tenant_id=NULL) built-in tools every template can reference by
-# name. Their real behavior lives in app/services/mcp_server — this just
-# registers the name so agent_compiler.py can resolve default_tools lists
-# to Tool rows before AgentVersionTool wiring exists per-tenant.
+# name. search_knowledge's real behavior lives in app/api/internal.py; the
+# rest ride Dograh's native nodes. This just registers the name so
+# agent_compiler.py can resolve default_tools lists to Tool rows before
+# AgentVersionTool wiring exists per-tenant.
 BUILT_IN_TOOLS = ["search_knowledge", "book_appointment", "create_lead", "transfer_call", "end_call"]
 
 

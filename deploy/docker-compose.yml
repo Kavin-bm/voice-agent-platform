@@ -87,10 +87,11 @@ services:
         condition: service_healthy
     command: ["arq", "app.workers.worker.WorkerSettings"]
 
-  # Dograh (voice runtime) is added as a git submodule at runtime/dograh and
-  # composed here once `git submodule add https://github.com/dograh-hq/dograh
-  # runtime/dograh` has been run — see runtime/README.md. Left out of this
-  # compose file until then so `docker compose up` works on a bare checkout.
+  # Dograh (voice runtime) lives at runtime/dograh as a git submodule and
+  # runs from its OWN compose file, not this one — see "Running Dograh
+  # locally" in the root README. Left out of this compose file so
+  # `docker compose up` here works on a bare checkout without also pulling
+  # in Dograh's stack.
 
 volumes:
   postgres_data:
