@@ -94,11 +94,11 @@ This isn't a mockup — every row marked *live* has run against an actual local 
 | Tools (built-in + generic webhook), synced to Dograh | Built, live |
 | Outbound campaigns (create/launch/pause/resume/progress) | Built, live, idempotent on retry |
 | Dashboard (businesses, agents, credentials, wizards) | Built |
-| Inbound number binding to a real telephony carrier | **Not yet** — needs a real Exotel/Plivo account; the wiring point is `PhoneNumber.bind` and it's the next thing to prove once one exists |
-| `Call.direction` | Hardcoded `inbound` — outbound campaign calls don't set it yet |
-| Composite one-shot onboarding endpoint | Not built — onboarding today is the API sequence below, not yet one call |
-| Analytics (volume, outcomes, latency percentiles) | Not built |
-| Production Docker packaging + smoke test | Not done |
+| Telephony binding (Plivo/Exotel credential → Dograh org config → number → `inbound_workflow_id`) | Built — a real inbound call hasn't rung yet, since that needs a KYC-cleared local number the platform doesn't have; see [Telephony binding](#telephony-binding) |
+| `Call.direction` / `campaign_lead_id` | Built, live — resolved from Dograh's own campaign-run context, not guessed |
+| Composite onboarding (`POST /api/v1/onboard`) | Built, live — business through published agent in one call |
+| Analytics (volume, outcome/status breakdown, duration + latency percentiles) | Built, live |
+| Production Docker packaging | Built, live — see [Running in Docker](#running-in-docker) |
 
 ## Repository layout
 
@@ -115,7 +115,8 @@ voice-agent-platform/
 │   │   ├── services/                     # agent_compiler, dograh_client, search, campaign_csv
 │   │   ├── workers/                        # ARQ worker + background jobs
 │   │   └── alembic/                          # migrations
-│   └── tests/
+│   ├── tests/
+│   └── Dockerfile
 ├── dashboard/                  # Next.js operator UI
 ├── templates/                    # generic role templates (5 YAML files)
 │   └── verticals/                  # industry overlays on top of a template
@@ -218,22 +219,60 @@ DOGRAH_CALLBACK_BASE_URL=http://host.docker.internal:8000   # correct in both ca
 
 The asymmetry is real, not a typo: `DOGRAH_BASE_URL` is how *we* reach Dograh, `DOGRAH_CALLBACK_BASE_URL` is how *Dograh's container* reaches us — and a container's route back to the host is never the same address the host uses for itself.
 
+## Running in Docker
+
+The dev setup above runs the control plane directly on the host so `--reload` works; `deploy/docker-compose.yml` also builds and runs it as containers, for something closer to how this would actually deploy. It reads its secrets from `deploy/.env`, a separate file from `control-plane/.env`:
+
+```bash
+cd deploy
+cp .env.example .env   # same secrets as control-plane/.env if you want the two to share a database
+docker compose up -d --build
+```
+
+`control-plane-api` runs `alembic upgrade head` before `uvicorn` on every start, and `control-plane-worker` runs the ARQ worker — both against the same `postgres`/`redis`/`minio` services in this same compose file. If Dograh is also running locally (previous section), point `DOGRAH_BASE_URL` at `http://host.docker.internal:18080` here instead of `localhost` — from inside a container, `localhost` means the container, not the host.
+
 ## Composing an agent
 
-There's no composite onboarding endpoint yet (see status table), so today it's this sequence:
+The fast path is one call:
+
+```bash
+POST /api/v1/onboard
+{
+  "business_name": "Smile Bright Dental",
+  "structured_config": {"hours": "9am-7pm", "city": "Pune"},
+  "default_transfer_number": "+919800000000",
+  "template_id": "<receptionist template id>",
+  "vertical_pack_id": "<dental india pack id>",
+  "agent_name": "Smile Bright Receptionist",
+  "policies": [{"category": "hours", "rule_text": "Never book outside 9am-7pm."}],
+  "knowledge_document_urls": ["https://example.com/price-list.pdf"],
+  "publish": true
+}
+```
+
+→ returns `business_id`, `agent_id`, `agent_version_id`, and `dograh_workflow_id` once the whole chain — business, agent, draft version, policies, knowledge, compile, publish — has actually succeeded. Pass a `phone_number` object (`number`, `provider`, `country_code`) too and it binds the number in the same call (see [Telephony binding](#telephony-binding) below for what that needs first).
+
+`onboarding.py` doesn't re-derive any of this — it calls the same endpoint functions listed below directly, so the composite path can never drift from what each step does on its own:
 
 ```
-POST /api/v1/businesses                                    → business_id
-POST /api/v1/agents          {business_id, template_id, vertical_pack_id}  → agent_id, draft version_id
-POST /api/v1/knowledge-sources                              → knowledge_source_id
-POST /api/v1/knowledge-sources/{id}/documents/upload         → ingestion runs on the ARQ worker
-POST /api/v1/agents/{id}/versions/{v}/policies  (repeatable) → escalation / handling rules beyond the vertical pack
-POST /api/v1/agents/{id}/versions/{v}/compile                → assembles the neutral spec
-POST /api/v1/agents/{id}/versions/{v}/publish                → pushes it to Dograh as a workflow
-POST /api/v1/phone-numbers/{id}/bind          {version_id}    → live
+POST /api/v1/businesses                                      → business_id
+POST /api/v1/agents            {business_id, template_id, vertical_pack_id}  → agent_id
+POST /api/v1/agents/{id}/versions                             → draft version_id (not created automatically by the line above)
+POST /api/v1/knowledge-sources                                → knowledge_source_id
+POST /api/v1/knowledge-sources/{id}/documents/upload           → ingestion runs on the ARQ worker
+POST /api/v1/agents/{id}/versions/{v}/policies  (repeatable)   → escalation / handling rules beyond the vertical pack
+POST /api/v1/agents/{id}/versions/{v}/compile                  → assembles the neutral spec
+POST /api/v1/agents/{id}/versions/{v}/publish                  → pushes it to Dograh as a workflow
+POST /api/v1/phone-numbers/{id}/bind            {version_id}    → live
 ```
 
 Binding is what swaps `PhoneNumber.bound_agent_version_id`, and it's the whole rollback mechanism: publishing never deletes the previous version, so rolling back is just binding the number to it again.
+
+### Telephony binding
+
+Binding a number pushes the tenant's stored telephony credential to Dograh as an org-level configuration (once, cached on the credential row), then creates or updates the number there with `inbound_workflow_id` set — for Plivo specifically, Dograh also rewrites the Plivo Application's `answer_url` for you, so there's no manual step on Plivo's own console. This is live-verified against a running Dograh instance and confirmed against its actual telephony-provider source, not guessed.
+
+What it hasn't done yet is ring: that needs a phone number, and Plivo (like every carrier serving India) requires KYC — business registration documents — to activate a local Indian DID, which this project doesn't have. A number on a provider that doesn't require it (e.g. a Plivo US/UK number, no code changes needed — `provider`/`country_code` are free values already) would prove the same path end to end; a real India-facing client number is a "when this is agency infrastructure, not a personal project" problem, not a code problem.
 
 ## Scaffolding a new vertical
 
@@ -264,6 +303,8 @@ All routes below are mounted under `/api/v1`, except `/internal/*` (Dograh-facin
 | `/phone-numbers` | Number registration + binding to a published version |
 | `/calls` | Call, transcript, recording history |
 | `/campaigns` | Outbound campaign create/launch/pause/resume/progress |
+| `/onboard` | Composite business → published agent flow in one call |
+| `/analytics` | Call volume, outcome/status breakdown, duration + latency percentiles |
 | `/internal/tools`, `/internal/webhooks` | Dograh → control-plane only |
 
 ## Design notes
@@ -275,13 +316,10 @@ A few decisions worth knowing before extending this:
 - **Knowledge never leaves this infrastructure.** Parsing, chunking, and embeddings are our own pipeline against our own Postgres, specifically so a client's documents never transit a third-party hosted service.
 - **Policies are never retrieved — they're injected.** The retrieval-vs-instruction split (`structured_config` = facts, `Policy` = rules, `Chunk` = retrieved knowledge) is a hard boundary in `agent_compiler.py`, not a convention someone could accidentally blur.
 - **Campaign launch is idempotent.** A retry after a partial failure resumes instead of creating a duplicate campaign on Dograh's side — found by actually hitting that failure, not designed in speculatively.
+- **Call direction is read, not assumed.** Dograh's campaign dispatcher sets `initial_context.direction="outbound"` and a top-level `campaign_id` on every campaign-dispatched run and nothing sets either for an inbound run — that absence is what `dograh_call_complete` keys off, confirmed against Dograh's source rather than inferred from behavior.
 
 ## Roadmap
 
-In rough order of what unblocks the most:
-
-1. Bind a real Exotel/Plivo number and prove inbound end to end (currently blocked on having a real telephony account).
-2. Fix `Call.direction` once outbound campaign calls are exercised against a bound number.
-3. Collapse the onboarding sequence above into one composite endpoint / CLI command.
-4. Call analytics — volume, outcome breakdown, latency percentiles per agent/template.
-5. Production Docker packaging and a single-VPS smoke test.
+1. **Prove a real inbound call end to end.** Blocked on a phone number — India-local DIDs need KYC (business registration) that this project doesn't have yet; a non-Indian Plivo number would prove the same code path today.
+2. **Draft test-call API.** Dograh has a Trigger-node path for exactly this (`/api/v1/public/agent/test/<trigger_path>`), but it's documented as authenticating via `X-API-Key` — Dograh's MPS-backed service-key issuance, which this project deliberately avoids (see Architecture above). Whether that endpoint also accepts the bearer-JWT auth `dograh_client.py` uses everywhere else is unconfirmed; until then, exercising a draft means publishing it and calling in for real. Right now a draft is only checked by reading `compiled_spec`, not by hearing it.
+3. **`Call.first_response_latency_ms`.** Analytics reports its percentiles honestly (null / zero-sample) because nothing populates this field yet — needs Dograh's webhook context inspected for a real time-to-first-response signal, the same way `initial_context.direction` was confirmed for call direction rather than guessed.
