@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 class PhoneNumberCreate(BaseModel):
     number: str
     provider: str
+    country_code: str | None = None
 
 
 class PhoneNumberRead(BaseModel):
@@ -14,6 +15,8 @@ class PhoneNumberRead(BaseModel):
     id: uuid.UUID
     number: str
     provider: str
+    country_code: str | None
+    dograh_phone_number_id: str | None
     bound_agent_version_id: uuid.UUID | None
 
 

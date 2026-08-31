@@ -16,6 +16,7 @@ OrganizationAIModelConfigurationV2 field shape confirmed against a running
 Dograh instance before first real use, not guessed.
 """
 
+import json
 import secrets
 
 import httpx
@@ -23,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import decrypt_secret, encrypt_secret
+from app.models.credential import TenantProviderCredential
+from app.models.phone_number import PhoneNumber
 from app.models.tenant import Tenant
 from app.providers.adapters.dograh import build_tool_definitions, build_workflow_definition
 
@@ -60,6 +63,9 @@ class _RaisingClient:
 
     async def post(self, url: str, **kwargs) -> httpx.Response:
         return await self.request("POST", url, **kwargs)
+
+    async def put(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("PUT", url, **kwargs)
 
     async def get(self, url: str, **kwargs) -> httpx.Response:
         return await self.request("GET", url, **kwargs)
@@ -245,3 +251,75 @@ async def fetch_call_artifact(tenant: Tenant, url: str) -> str:
         response = await auth_client.get(url, headers={"Authorization": f"Bearer {token}"})
         response.raise_for_status()
         return response.text
+
+
+async def ensure_telephony_configured(
+    db: AsyncSession, tenant: Tenant, credential: TenantProviderCredential
+) -> str:
+    """Idempotent: pushes a tenant's stored telephony credential to Dograh
+    as an organization-level telephony configuration the first time it's
+    needed, returning Dograh's config id. Confirmed against source
+    (routes/organization.py, services/telephony/providers/<name>/config.py):
+    ``config`` is a discriminated union on ``provider`` carrying exactly the
+    provider's own credential fields (e.g. Plivo wants auth_id/auth_token) —
+    no separate account_id/secret split on our side, we just forward
+    whatever the operator entered under that provider_name."""
+    if credential.dograh_telephony_config_id:
+        return credential.dograh_telephony_config_id
+
+    token = await _login(tenant)
+    creds = json.loads(decrypt_secret(credential.encrypted_credentials))
+
+    async with _client() as client:
+        response = await client.post(
+            "/api/v1/organizations/telephony-configs",
+            json={
+                "name": f"{credential.provider_name}-{tenant.slug}",
+                "config": {"provider": credential.provider_name, **creds},
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    credential.dograh_telephony_config_id = str(response.json()["id"])
+    await db.commit()
+    return credential.dograh_telephony_config_id
+
+
+async def sync_phone_number(
+    db: AsyncSession,
+    tenant: Tenant,
+    telephony_config_id: str,
+    phone_number: PhoneNumber,
+    dograh_workflow_id: str | None,
+) -> str:
+    """Creates this number on Dograh the first time (PUT on every rebind
+    after), setting inbound_workflow_id so Dograh points the provider's
+    inbound webhook at our published workflow. For Plivo specifically this
+    also rewrites the Plivo Application's answer_url via Dograh's
+    programmatic sync (services/telephony/providers/plivo — no manual
+    console step on the provider's side). Returns Dograh's phone-number id."""
+    token = await _login(tenant)
+    inbound_workflow_id = int(dograh_workflow_id) if dograh_workflow_id else None
+
+    async with _client() as client:
+        if phone_number.dograh_phone_number_id:
+            response = await client.put(
+                f"/api/v1/organizations/telephony-configs/{telephony_config_id}"
+                f"/phone-numbers/{phone_number.dograh_phone_number_id}",
+                json={"inbound_workflow_id": inbound_workflow_id},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        else:
+            response = await client.post(
+                f"/api/v1/organizations/telephony-configs/{telephony_config_id}/phone-numbers",
+                json={
+                    "address": phone_number.number,
+                    "country_code": phone_number.country_code,
+                    "inbound_workflow_id": inbound_workflow_id,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+    phone_number.dograh_phone_number_id = str(response.json()["id"])
+    await db.commit()
+    return phone_number.dograh_phone_number_id
