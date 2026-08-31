@@ -2,12 +2,14 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     agents,
+    analytics,
     auth,
     businesses,
     calls,
     campaigns,
     credentials,
     knowledge,
+    onboarding,
     phone_numbers,
     policies,
     templates,
@@ -26,3 +28,5 @@ api_router.include_router(policies.router)
 api_router.include_router(phone_numbers.router)
 api_router.include_router(calls.router)
 api_router.include_router(campaigns.router)
+api_router.include_router(onboarding.router)
+api_router.include_router(analytics.router)
