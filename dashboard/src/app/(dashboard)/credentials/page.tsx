@@ -93,7 +93,7 @@ export default function CredentialsPage() {
       {credentials.data && credentials.data.length === 0 && !showForm && (
         <EmptyState
           title="No credentials yet"
-          description="Add this client's Sarvam, Exotel, and Gemini keys — publishing an agent needs them to reach a real phone line."
+          description="Stored encrypted for this tenant. A telephony key is sent to Dograh when you bind a number. An OpenAI key embeds documents. Speech and conversational model keys are kept here and are not pushed to the voice runtime yet."
           action={
             <Button variant="secondary" onClick={() => setShowForm(true)}>
               <IconPlus className="h-4 w-4" />
